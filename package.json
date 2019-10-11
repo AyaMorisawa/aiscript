@@ -1,0 +1,25 @@
+{
+  "name": "aiscript",
+  "version": "1.0.0",
+  "description": "The AiScript Engine",
+  "author": {
+    "name": "Aya Morisawa",
+    "url": "https://github.com/AyaMorisawa"
+  },
+  "license": "AGPL-3.0",
+  "repository": "https://github.com/AyaMorisawa/aiscript.git",
+  "bugs": "https://github.com/AyaMorisawa/aiscript/issues",
+  "main": "./built/index.js",
+  "types": "./built/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "mocha -w -r ts-node/register --watch-extensions ts"
+  },
+  "devDependencies": {
+    "@types/mocha": "5.2.7",
+    "@types/node": "12.7.5",
+    "mocha": "6.2.0",
+    "ts-node": "8.4.1",
+    "typescript": "3.6.3"
+  }
+}
