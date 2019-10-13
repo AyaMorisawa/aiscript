@@ -72,26 +72,21 @@ function parseStatement(tokens: T.Token[]): ParseResult<N.StatementNode> {
 }
 
 const identifierParser = token(T.TokenTag.Identifier)
-  .map<N.IdentifierNode>((token: T.IdentifierToken) => ({ tag: N.NodeTag.Identifier, identifier: token.identifier }))
-  .error(new SyntaxError('Expected an identifier'));
+  .map<N.IdentifierNode>((token: T.IdentifierToken) => ({ tag: N.NodeTag.Identifier, identifier: token.identifier }));
 
 const numberParser = token(T.TokenTag.Number)
-  .map<N.NumberNode>((token: T.NumberToken) => ({ tag: N.NodeTag.Number, number: token.number }))
-  .error(new SyntaxError('Expected a number'));
+  .map<N.NumberNode>((token: T.NumberToken) => ({ tag: N.NodeTag.Number, number: token.number }));
 
 const stringParser = token(T.TokenTag.String)
-  .map<N.StringNode>((token: T.StringToken) => ({ tag: N.NodeTag.String, string: token.string }))
-  .error(new SyntaxError('Expected a string'));
+  .map<N.StringNode>((token: T.StringToken) => ({ tag: N.NodeTag.String, string: token.string }));
 
 const arrayParser = token(T.TokenTag.OpenSquareBracket).then(_interop(parseExpression).sepBy(token(T.TokenTag.Comma))).skip(token(T.TokenTag.CloseSquareBracket))
   .map<N.ArrayNode>(exprs => ({
     tag: N.NodeTag.Array,
     items: exprs,
-  }))
-  .error(new SyntaxError('Expected an array'));
+  }));
 
-const blockParser = token(T.TokenTag.OpenBrace).then(_interop(parseProgram)).skip(token(T.TokenTag.CloseBrace))
-  .error(new SyntaxError('Expected a block'));
+const blockParser = token(T.TokenTag.OpenBrace).then(_interop(parseProgram)).skip(token(T.TokenTag.CloseBrace));
 
 const paramsParser = P.alt(
   identifierParser.map(identifier => [identifier]),
@@ -103,8 +98,22 @@ const functionParser = P.seq(token(T.TokenTag.BackSlash).then(paramsParser), tok
     tag: N.NodeTag.Function,
     parameters: parameters.map(parameter => parameter.identifier),
     body,
-  }))
-  .error(new SyntaxError('Expected a function'));
+  }));
+
+const argsParser = token(T.TokenTag.OpenParenthesis).then(_interop(parseExpression).sepBy(token(T.TokenTag.Comma))).skip(token(T.TokenTag.CloseParenthesis))
+  .map<(expr: N.ExpressionNode) => N.ExpressionNode>(args => expr => ({
+    tag: N.NodeTag.Call,
+    function: expr,
+    argumentExpressions: args,
+  }));
+
+const indexAccessParser = token(T.TokenTag.OpenSquareBracket).then(_interop(parseExpression)).skip(token(T.TokenTag.CloseSquareBracket))
+  .map<(expr: N.ExpressionNode) => N.ExpressionNode>(index => expr => ({
+    tag: N.NodeTag.Binary,
+    left: expr,
+    right: index,
+    op: N.BinaryOperator.IndexAccess,
+  }));
 
 function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   const expr9Parser = P.alt(
@@ -116,6 +125,9 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
     numberParser,
     stringParser,
   );
+
+  const expr8Parser = P.seq(expr9Parser, P.alt(argsParser, indexAccessParser).many())
+    .map(([base, actions]) => actions.reduce((acc, action) => action(acc), base));
 
   return parseExpression0(tokens);
 
@@ -328,86 +340,15 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression7(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
-    // E7 = "!" E7 | E8
-    if (tokens.length === 0) return null;
-    if (tokens[0].tag === T.TokenTag.Not) {
-      const expr = parseExpression7(tokens.slice(1));
-      return {
-        value: {
-          tag: N.NodeTag.Unary,
-          target: expr.value,
-          op: N.UnaryOperator.Not,
-        },
-        nextTokens: expr.nextTokens,
-      };
-    } else {
-      return parseExpression8(tokens);
-    }
-  }
-
-  function parseExpression8(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
-    // E8 = E9 ("(" (E ("," E)*)? ")" | "[" E "]")*
-    const expr9 = expr9Parser.parse(new P.Source(tokens, 0));
-    if (expr9.tag === P.ParseResultTag.Failure) return null;
-    tokens = expr9.source.tokens.slice(expr9.source.offset);
-    const argsList: [T.TokenTag.OpenParenthesis | T.TokenTag.OpenSquareBracket, N.ExpressionNode[]][] = [];
-    while (tokens.length !== 0 && (tokens[0].tag === T.TokenTag.OpenParenthesis || tokens[0].tag === T.TokenTag.OpenSquareBracket)) {
-      switch (tokens[0].tag) {
-        case T.TokenTag.OpenParenthesis:
-          tokens = tokens.slice(1);
-          if (tokens.length === 0) return null;
-          if (tokens[0].tag === T.TokenTag.CloseParenthesis) {
-            argsList.push([T.TokenTag.OpenParenthesis, []]);
-            tokens = tokens.slice(1);
-          } else {
-            const firstArg = parseExpression0(tokens);
-            if (firstArg === null) return null;
-            const args = [firstArg.value];
-            tokens = firstArg.nextTokens;
-
-            while (tokens.length !== 0 && tokens[0].tag === T.TokenTag.Comma) {
-              const arg = parseExpression0(tokens.slice(1));
-              if (arg === null) return null;
-              tokens = arg.nextTokens;
-              args.push(arg.value);
-            }
-            if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.CloseParenthesis) return null;
-            tokens = tokens.slice(1);
-            argsList.push([T.TokenTag.OpenParenthesis, args]);
-          }
-          break;
-        case T.TokenTag.OpenSquareBracket:
-          tokens = tokens.slice(1);
-          if (tokens.length === 0) return null;
-          const index = parseExpression0(tokens);
-          if (index === null) return null;
-          tokens = index.nextTokens;
-          if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.CloseSquareBracket) return null;
-          tokens = tokens.slice(1);
-          argsList.push([T.TokenTag.OpenSquareBracket, [index.value]]);
-          break;
-      }
-    }
-    return {
-      value: argsList.reduce<N.ExpressionNode>((acc, [tag, args]) => {
-        switch (tag) {
-          case T.TokenTag.OpenParenthesis:
-            return {
-              tag: N.NodeTag.Call,
-              function: acc,
-              argumentExpressions: args
-            };
-          case T.TokenTag.OpenSquareBracket:
-            return {
-              tag: N.NodeTag.Binary,
-              left: acc,
-              right: args[0],
-              op: N.BinaryOperator.IndexAccess,
-            };
-        }
-      }, expr9.value),
-      nextTokens: tokens,
-    };
+    const expr7Parser = P.seq(token(T.TokenTag.Not).many(), expr8Parser)
+      .map<N.ExpressionNode>(([ops, expr]) => ops.length % 2 == 0 ? expr : {
+        tag: N.NodeTag.Unary,
+        target: expr,
+        op: N.UnaryOperator.Not,
+      });
+    const result = expr7Parser.parse(new P.Source(tokens, 0));
+    if (result.tag === P.ParseResultTag.Failure) return null;
+    return { value: result.value, nextTokens: result.source.tokens.slice(result.source.offset) };
   }
 }
 
