@@ -1,5 +1,6 @@
 import * as T from './tokens';
 import * as N from './nodes';
+import * as P from './parser-combinators';
 
 export class SyntaxError extends Error {
   constructor(message: string) {
@@ -18,6 +19,7 @@ export function parse(tokens: T.Token[]): N.ProgramNode {
 }
 
 function parseProgram(tokens: T.Token[]): ParseResult<N.ProgramNode> {
+  // P = S*
   const statements: N.StatementNode[] = [];
   while (true) {
     const statement = parseStatement(tokens);
@@ -37,6 +39,7 @@ function parseProgram(tokens: T.Token[]): ParseResult<N.ProgramNode> {
 type ParseResult<T> = { value: T, nextTokens: T.Token[] } | null;
 
 function parseStatement(tokens: T.Token[]): ParseResult<N.StatementNode> {
+  // S = E ("=" E ";")?
   const left = parseExpression(tokens);
   if (left === null) return null;
   tokens = left.nextTokens;
@@ -68,43 +71,56 @@ function parseStatement(tokens: T.Token[]): ParseResult<N.StatementNode> {
   }
 }
 
-function parseIdentifier(tokens: T.Token[]): ParseResult<N.IdentifierNode> {
-  if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.Identifier) return null;
-  return {
-    value: {
-      tag: N.NodeTag.Identifier,
-      identifier: tokens[0].identifier,
-    },
-    nextTokens: tokens.slice(1),
-  };
-}
+const identifierParser = token(T.TokenTag.Identifier)
+  .map<N.IdentifierNode>((token: T.IdentifierToken) => ({ tag: N.NodeTag.Identifier, identifier: token.identifier }))
+  .error(new SyntaxError('Expected an identifier'));
 
-function parseNumber(tokens: T.Token[]): ParseResult<N.NumberNode> {
-  if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.Number) return null;
-  return {
-    value: {
-      tag: N.NodeTag.Number,
-      number: tokens[0].number,
-    },
-    nextTokens: tokens.slice(1),
-  };
-}
+const numberParser = token(T.TokenTag.Number)
+  .map<N.NumberNode>((token: T.NumberToken) => ({ tag: N.NodeTag.Number, number: token.number }))
+  .error(new SyntaxError('Expected a number'));
 
-function parseString(tokens: T.Token[]): ParseResult<N.StringNode> {
-  if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.String) return null;
-  return {
-    value: {
-      tag: N.NodeTag.String,
-      string: tokens[0].string,
-    },
-    nextTokens: tokens.slice(1),
-  };
-}
+const stringParser = token(T.TokenTag.String)
+  .map<N.StringNode>((token: T.StringToken) => ({ tag: N.NodeTag.String, string: token.string }))
+  .error(new SyntaxError('Expected a string'));
+
+const arrayParser = token(T.TokenTag.OpenSquareBracket).then(_interop(parseExpression).sepBy(token(T.TokenTag.Comma))).skip(token(T.TokenTag.CloseSquareBracket))
+  .map<N.ArrayNode>(exprs => ({
+    tag: N.NodeTag.Array,
+    items: exprs,
+  }))
+  .error(new SyntaxError('Expected an array'));
+
+const blockParser = token(T.TokenTag.OpenBrace).then(_interop(parseProgram)).skip(token(T.TokenTag.CloseBrace))
+  .error(new SyntaxError('Expected a block'));
+
+const paramsParser = P.alt(
+  identifierParser.map(identifier => [identifier]),
+  token(T.TokenTag.OpenParenthesis).then(identifierParser.sepBy(token(T.TokenTag.Comma))).skip(token(T.TokenTag.CloseParenthesis))
+);
+
+const functionParser = P.seq(token(T.TokenTag.BackSlash).then(paramsParser), token(T.TokenTag.Arrow).then(_interop(parseExpression)))
+  .map<N.FunctionNode>(([parameters, body]) => ({
+    tag: N.NodeTag.Function,
+    parameters: parameters.map(parameter => parameter.identifier),
+    body,
+  }))
+  .error(new SyntaxError('Expected a function'));
 
 function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+  const expr9Parser = P.alt(
+    token(T.TokenTag.OpenParenthesis).then(_interop(parseExpression)).skip(token(T.TokenTag.CloseParenthesis)),
+    functionParser,
+    arrayParser,
+    blockParser,
+    identifierParser,
+    numberParser,
+    stringParser,
+  );
+
   return parseExpression0(tokens);
 
   function parseExpression0(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E0 = "if" E "then" E "else" E | E1
     if (tokens.length === 0) return null;
     if (tokens[0].tag === T.TokenTag.If) {
       const condition = parseExpression0(tokens.slice(1));
@@ -133,6 +149,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression1(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E1 = E2 ("&&" E2)*
     const expr2 = parseExpression2(tokens);
     if (expr2 === null) return null;
     tokens = expr2.nextTokens;
@@ -155,6 +172,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression2(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E2 = E3 ("&&" E3)*
     const expr3 = parseExpression3(tokens);
     if (expr3 === null) return null;
     tokens = expr3.nextTokens;
@@ -177,6 +195,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression3(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E3 = E4 ("==" E4 | "!=" E4)*
     const expr4 = parseExpression4(tokens);
     if (expr4 === null) return null;
     tokens = expr4.nextTokens;
@@ -207,6 +226,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression4(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E4 = E5 ("<" E5 | "<=" E5 | ">" E5 | ">=" E5)*
     const expr5 = parseExpression5(tokens);
     if (expr5 === null) return null;
     tokens = expr5.nextTokens;
@@ -243,6 +263,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression5(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E5 = E6 ("+" E6 | "-" E6)*
     const expr6 = parseExpression6(tokens);
     if (expr6 === null) return null;
     tokens = expr6.nextTokens;
@@ -273,6 +294,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression6(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E6 = E7 ("*" E7 | "/" E7 | "%" E7)*
     const expr7 = parseExpression7(tokens);
     if (expr7 === null) return null;
     tokens = expr7.nextTokens;
@@ -306,6 +328,7 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression7(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
+    // E7 = "!" E7 | E8
     if (tokens.length === 0) return null;
     if (tokens[0].tag === T.TokenTag.Not) {
       const expr = parseExpression7(tokens.slice(1));
@@ -323,13 +346,11 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
   }
 
   function parseExpression8(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
-    const expr9 = parseExpression9(tokens);
-    if (expr9 === null) return null;
-    tokens = expr9.nextTokens;
-
-
+    // E8 = E9 ("(" (E ("," E)*)? ")" | "[" E "]")*
+    const expr9 = expr9Parser.parse(new P.Source(tokens, 0));
+    if (expr9.tag === P.ParseResultTag.Failure) return null;
+    tokens = expr9.source.tokens.slice(expr9.source.offset);
     const argsList: [T.TokenTag.OpenParenthesis | T.TokenTag.OpenSquareBracket, N.ExpressionNode[]][] = [];
-
     while (tokens.length !== 0 && (tokens[0].tag === T.TokenTag.OpenParenthesis || tokens[0].tag === T.TokenTag.OpenSquareBracket)) {
       switch (tokens[0].tag) {
         case T.TokenTag.OpenParenthesis:
@@ -388,124 +409,20 @@ function parseExpression(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
       nextTokens: tokens,
     };
   }
-
-  function parseExpression9(tokens: T.Token[]): ParseResult<N.ExpressionNode> {
-    if (tokens.length === 0) return null;
-    if (tokens[0].tag === T.TokenTag.OpenSquareBracket) {
-      tokens = tokens.slice(1);
-      const items: N.ExpressionNode[] = []
-
-      if (tokens[0].tag === T.TokenTag.CloseSquareBracket) {
-        tokens = tokens.slice(1);
-      } else {
-        const firstItem = parseExpression0(tokens);
-        if (firstItem === null) return null;
-        items.push(firstItem.value);
-        tokens = firstItem.nextTokens;
-        while (tokens.length !== 0 && tokens[0].tag === T.TokenTag.Comma) {
-          const item = parseExpression0(tokens.slice(1));
-          if (item === null) return null;
-          items.push(item.value);
-          tokens = item.nextTokens;
-        }
-        if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.CloseSquareBracket) return null;
-        tokens = tokens.slice(1);
-      }
-      return {
-        value: {
-          tag: N.NodeTag.Array,
-          items,
-        },
-        nextTokens: tokens
-      };
-    } else if (tokens[0].tag === T.TokenTag.BackSlash) {
-      tokens = tokens.slice(1);
-      if (tokens.length === 0) return null;
-      if (tokens[0].tag === T.TokenTag.OpenParenthesis) {
-        tokens = tokens.slice(1);
-        if (tokens.length === 0) return null;
-        if (tokens[0].tag === T.TokenTag.CloseParenthesis) {
-          tokens = tokens.slice(1);
-          if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.Arrow) return null;
-          const expr = parseExpression0(tokens.slice(1));
-          if (expr === null) return null;
-          return {
-            value: {
-              tag: N.NodeTag.Function,
-              parameters: [],
-              body: expr.value,
-            },
-            nextTokens: expr.nextTokens,
-          }
-        } else if (tokens[0].tag === T.TokenTag.Identifier) {
-          const parameters = [tokens[0].identifier];
-          tokens = tokens.slice(1);
-          while (tokens.length > 0 && tokens[0].tag !== T.TokenTag.CloseParenthesis) {
-            if (tokens[0].tag !== T.TokenTag.Comma) return null;
-            const identifier = parseIdentifier(tokens.slice(1));
-            if (identifier === null) return null;
-            tokens = identifier.nextTokens;
-            parameters.push(identifier.value.identifier);
-          }
-          tokens = tokens.slice(1);
-          if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.Arrow) return null;
-          const expr = parseExpression0(tokens.slice(1));
-          if (expr === null) return null;
-          return {
-            value: {
-              tag: N.NodeTag.Function,
-              parameters: parameters,
-              body: expr.value,
-            },
-            nextTokens: expr.nextTokens,
-          }
-        } else {
-          return null;
-        }
-      } else if (tokens[0].tag === T.TokenTag.Identifier) {
-        const parameter = tokens[0].identifier;
-        tokens = tokens.slice(1);
-        if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.Arrow) return null;
-        const expr = parseExpression0(tokens.slice(1));
-        if (expr === null) return null;
-        return {
-          value: {
-            tag: N.NodeTag.Function,
-            parameters: [parameter],
-            body: expr.value,
-          },
-          nextTokens: expr.nextTokens,
-        }
-      } else {
-        return null;
-      }
-    } else if (tokens[0].tag === T.TokenTag.OpenParenthesis) {
-      const expr = parseExpression0(tokens.slice(1));
-      if (expr === null) return null;
-      tokens = expr.nextTokens;
-      if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.CloseParenthesis) return null;
-      return {
-        value: expr.value,
-        nextTokens: tokens.slice(1),
-      }
-    } else if (tokens[0].tag === T.TokenTag.OpenBrace) {
-      const program = parseProgram(tokens.slice(1));
-      if (program === null) return null;
-      tokens = program.nextTokens;
-      if (tokens.length === 0 || tokens[0].tag !== T.TokenTag.CloseBrace) return null;
-      return {
-        value: program.value,
-        nextTokens: tokens.slice(1),
-      }
-    } else {
-      const identifier = parseIdentifier(tokens);
-      if (identifier !== null) return identifier;
-      const number = parseNumber(tokens);
-      if (number !== null) return number;
-      const string = parseString(tokens);
-      if (string !== null) return string;
-      return null;
-    }
-  }
 }
 
+function token(tag: T.TokenTag): P.Parser<T.Token, T.Token, null> {
+  return P.when(token => token.tag === tag);
+}
+
+// TODO: eliminate this
+function _interop<T>(f: (tokens: T.Token[]) => ParseResult<T>): P.Parser<T.Token, T, null> {
+  return new P.Parser(source => {
+    const program = f(source.tokens.slice(source.offset));
+    if (program === null) {
+      return { tag: P.ParseResultTag.Failure, error: null };
+    } else {
+      return { tag: P.ParseResultTag.Success, value: program.value, source: new P.Source(program.nextTokens, 0) };
+    }
+  })
+}

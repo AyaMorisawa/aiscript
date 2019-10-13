@@ -393,6 +393,16 @@ describe('evaluate basics', () => {
     );
   });
 
+  it('empty array', () => {
+    assert.deepStrictEqual(
+      run('foo = [];').get('foo'),
+      {
+        tag: N.NodeTag.Array,
+        items: [],
+      },
+    );
+  });
+
   it('array of array', () => {
     assert.deepStrictEqual(
       run('foo = [[3, 1], [4], [1, 5, 9]];').get('foo'),
