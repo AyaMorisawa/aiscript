@@ -71,7 +71,6 @@ function parseStatement(tokens: T.Token[]): ParseResult<N.StatementNode> {
   }
 }
 
-// { identifier: P.Parser<T.Token, N.ExpressionNode, null> }
 type Parser<N> = P.Parser<T.Token, N, null>;
 
 const parsers = P.lazy<{
