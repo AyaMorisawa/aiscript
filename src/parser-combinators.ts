@@ -164,3 +164,17 @@ export function seq<InputValue, OutputValue, ErrorValue>(...parsers: Parser<Inpu
 export function succeed<InputValue, OutputValue, ErrorValue>(value: OutputValue): Parser<InputValue, OutputValue, ErrorValue> {
   return new Parser(source => ({ tag: ParseResultTag.Success, value, source }));
 }
+
+export function lazy<LP>(parsers: { [P in keyof LP]: (r: LP) => LP[P] }): LP {
+  const language: any = {};
+  for (const key of Object.keys(parsers)) {
+    (key => {
+      let p = null;
+      language[key] = new Parser(source => {
+        if (p === null) p = parsers[key](language);
+        return p.parse(source);
+      });
+    })(key);
+  }
+  return language;
+}
